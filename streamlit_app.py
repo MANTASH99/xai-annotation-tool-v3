@@ -264,7 +264,7 @@ def render_phase_a(sample, annotator):
                         # Select: assign next rank number
                         ranks[word_idx] = len(ranks) + 1
                     else:
-                        st.toast(f"Maximum {MAX_HIGHLIGHT} words. Deselect one first.", icon="!")
+                        st.toast(f"Maximum {MAX_HIGHLIGHT} words. Deselect one first.", icon="⚠️")
                     st.rerun()
 
     # Get ordered selection (sorted by rank value, NOT by word index)
