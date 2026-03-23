@@ -301,6 +301,8 @@ def render_phase_a(sample, annotator):
                         ranks[word_idx] = len(ranks) + 1
                     else:
                         st.toast(f"Maximum {MAX_HIGHLIGHT} words. Deselect one first.", icon="⚠️")
+                    # Pin navigation so selectbox stays on this sample
+                    st.session_state["_nav_target"] = st.session_state.get("_current_nav_idx", 0)
                     st.rerun()
 
     # Get ordered selection (sorted by rank value, NOT by word index)
@@ -351,6 +353,8 @@ def render_phase_a(sample, annotator):
             **rank_data,
         })
         st.session_state[f"sample_{sample_id}_phase_a_done"] = True
+        # Pin navigation so selectbox stays on this sample
+        st.session_state["_nav_target"] = st.session_state.get("_current_nav_idx", 0)
         st.success("Phase A saved! Scroll down for Phase B.")
         st.rerun()
 
@@ -650,6 +654,9 @@ def main():
     )
     current_id = filtered_ids[current_idx]
     sample = sample_map[current_id]
+
+    # Store current index so phase renderers can preserve it across st.rerun()
+    st.session_state["_current_nav_idx"] = current_idx
 
     # Navigation buttons
     nav_col1, nav_col2 = st.sidebar.columns(2)
