@@ -265,15 +265,31 @@ def render_phase_a(sample, annotator):
 
     # Word selection
     key_prefix = f"phase_a_{sample_id}"
+    ranks_key = f"{key_prefix}_ranks"
 
     # Use a dict {word_idx: rank_number} so rank is an explicit integer,
     # not dependent on list/dict ordering which Streamlit can lose across reruns.
-    if f"{key_prefix}_ranks" not in st.session_state:
-        st.session_state[f"{key_prefix}_ranks"] = {}
+    if ranks_key not in st.session_state:
+        st.session_state[ranks_key] = {}
 
-    ranks = st.session_state[f"{key_prefix}_ranks"]
+    ranks = st.session_state[ranks_key]
 
-    # Render clickable words
+    # Show max-words warning from previous click (callbacks can't call st.toast)
+    if st.session_state.pop("_max_words_warning", False):
+        st.toast(f"Maximum {MAX_HIGHLIGHT} words. Deselect one first.", icon="⚠️")
+
+    # Render clickable words — use on_click callbacks (no st.rerun needed)
+    def _toggle_word(w_idx, rk, max_h):
+        if w_idx in rk:
+            removed = rk.pop(w_idx)
+            for idx in rk:
+                if rk[idx] > removed:
+                    rk[idx] -= 1
+        elif len(rk) < max_h:
+            rk[w_idx] = len(rk) + 1
+        else:
+            st.session_state["_max_words_warning"] = True
+
     words_per_row = 10
     for row_start in range(0, len(words), words_per_row):
         row_words = words[row_start:min(row_start + words_per_row, len(words))]
@@ -282,26 +298,15 @@ def render_phase_a(sample, annotator):
             word_idx = row_start + j
             is_selected = word_idx in ranks
             with col:
-                # Show rank number on selected buttons
                 btn_label = f"{ranks[word_idx]}. {word}" if is_selected else word
-                if st.button(
+                st.button(
                     btn_label,
                     key=f"{key_prefix}_word_{word_idx}",
                     type="primary" if is_selected else "secondary",
                     use_container_width=True,
-                ):
-                    if word_idx in ranks:
-                        # Deselect: remove and compact remaining ranks
-                        removed_rank = ranks.pop(word_idx)
-                        for idx in ranks:
-                            if ranks[idx] > removed_rank:
-                                ranks[idx] -= 1
-                    elif len(ranks) < MAX_HIGHLIGHT:
-                        # Select: assign next rank number
-                        ranks[word_idx] = len(ranks) + 1
-                    else:
-                        st.toast(f"Maximum {MAX_HIGHLIGHT} words. Deselect one first.", icon="⚠️")
-                    st.rerun()
+                    on_click=_toggle_word,
+                    args=(word_idx, ranks, MAX_HIGHLIGHT),
+                )
 
     # Get ordered selection (sorted by rank value, NOT by word index)
     selected_by_rank = sorted(ranks.items(), key=lambda x: x[1])
