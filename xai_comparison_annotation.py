@@ -301,8 +301,6 @@ def render_phase_a(sample, annotator):
                         ranks[word_idx] = len(ranks) + 1
                     else:
                         st.toast(f"Maximum {MAX_HIGHLIGHT} words. Deselect one first.", icon="⚠️")
-                    # Pin navigation so selectbox stays on this sample
-                    st.session_state["_nav_target"] = st.session_state.get("_current_nav_idx", 0)
                     st.rerun()
 
     # Get ordered selection (sorted by rank value, NOT by word index)
@@ -353,8 +351,6 @@ def render_phase_a(sample, annotator):
             **rank_data,
         })
         st.session_state[f"sample_{sample_id}_phase_a_done"] = True
-        # Pin navigation so selectbox stays on this sample
-        st.session_state["_nav_target"] = st.session_state.get("_current_nav_idx", 0)
         st.success("Phase A saved! Scroll down for Phase B.")
         st.rerun()
 
@@ -450,9 +446,8 @@ def render_phase_b(sample, annotator):
             "rank_attention": method_ranks.get("attention"),
         })
         st.session_state[f"sample_{sample_id}_phase_b_done"] = True
-        # Stay at same index: the completed sample drops from filtered list,
-        # so same index now points to the next incomplete sample
-        st.session_state["_nav_target"] = st.session_state.get("_sample_nav_selectbox", 0)
+        # Clear current sample so resume logic finds the next incomplete one
+        st.session_state.pop("_current_sample_id", None)
         st.success("Phase B saved! Sample complete.")
         st.rerun()
 
@@ -629,46 +624,69 @@ def main():
         st.success("All samples are complete! Thank you!")
         return
 
-    # Sample navigation
+    # ------------------------------------------------------------------
+    # Navigation — tracked by SAMPLE ID, not list index
+    # ------------------------------------------------------------------
     st.sidebar.markdown("## Navigation")
+    filtered_id_set = set(filtered_ids)
 
+    # Detect annotator change → reset navigation
+    if st.session_state.get("_prev_annotator") != annotator:
+        st.session_state["_prev_annotator"] = annotator
+        st.session_state.pop("_current_sample_id", None)
+
+    # Determine which sample to show
+    if "_current_sample_id" not in st.session_state or \
+       st.session_state["_current_sample_id"] not in filtered_id_set:
+        # First load OR current sample was just completed (dropped from list)
+        # → find the first incomplete sample AFTER the last completed one
+        if fully_done:
+            last_done_pos = max(
+                (sample_ids.index(sid) for sid in fully_done if sid in set(sample_ids)),
+                default=-1,
+            )
+            resume_id = None
+            for sid in filtered_ids:
+                if sample_ids.index(sid) > last_done_pos:
+                    resume_id = sid
+                    break
+            st.session_state["_current_sample_id"] = resume_id or filtered_ids[0]
+        else:
+            st.session_state["_current_sample_id"] = filtered_ids[0]
+
+    current_id = st.session_state["_current_sample_id"]
+    current_idx = filtered_ids.index(current_id)
+
+    # Selectbox — force it to match current_id every render
     nav_key = "_sample_nav_selectbox"
+    st.session_state[nav_key] = current_idx
 
-    # Apply programmatic navigation from Prev/Next buttons
-    if "_nav_target" in st.session_state:
-        target = st.session_state.pop("_nav_target")
-        target = max(0, min(target, len(filtered_ids) - 1))
-        st.session_state[nav_key] = target
-
-    # Clamp existing selectbox state to valid range (list may have shrunk after completion)
-    if nav_key in st.session_state:
-        val = st.session_state[nav_key]
-        if val >= len(filtered_ids):
-            st.session_state[nav_key] = max(0, len(filtered_ids) - 1)
-
-    current_idx = st.sidebar.selectbox(
+    shown_idx = st.sidebar.selectbox(
         "Sample",
         range(len(filtered_ids)),
         format_func=lambda i: f"Sample {filtered_ids[i]} ({samples[sample_ids.index(filtered_ids[i])]['label']})",
         key=nav_key,
     )
-    current_id = filtered_ids[current_idx]
-    sample = sample_map[current_id]
 
-    # Store current index so phase renderers can preserve it across st.rerun()
-    st.session_state["_current_nav_idx"] = current_idx
+    # If user manually changed the dropdown, update current sample
+    if shown_idx != current_idx:
+        st.session_state["_current_sample_id"] = filtered_ids[shown_idx]
+        current_id = filtered_ids[shown_idx]
+        current_idx = shown_idx
+
+    sample = sample_map[current_id]
 
     # Navigation buttons
     nav_col1, nav_col2 = st.sidebar.columns(2)
     with nav_col1:
         if current_idx > 0:
             if st.button("Previous"):
-                st.session_state["_nav_target"] = current_idx - 1
+                st.session_state["_current_sample_id"] = filtered_ids[current_idx - 1]
                 st.rerun()
     with nav_col2:
         if current_idx < len(filtered_ids) - 1:
             if st.button("Next"):
-                st.session_state["_nav_target"] = current_idx + 1
+                st.session_state["_current_sample_id"] = filtered_ids[current_idx + 1]
                 st.rerun()
 
     # Show sample header
