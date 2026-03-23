@@ -680,21 +680,6 @@ def main():
             st.session_state["_current_sample_id"] = filtered_ids[current_idx + 1]
             st.rerun()
 
-    # Jump to position
-    def _on_jump():
-        pos = st.session_state.get("_jump_input", 1)
-        pos = max(1, min(pos, len(filtered_ids)))
-        st.session_state["_current_sample_id"] = filtered_ids[pos - 1]
-
-    st.sidebar.number_input(
-        "Jump to position",
-        min_value=1,
-        max_value=len(filtered_ids),
-        value=current_idx + 1,
-        key="_jump_input",
-        on_change=_on_jump,
-    )
-
     sample = sample_map[current_id]
 
     # Show sample header
