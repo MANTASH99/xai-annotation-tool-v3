@@ -635,7 +635,7 @@ def main():
     # Clamp existing selectbox state to valid range (list may have shrunk after completion)
     if nav_key in st.session_state:
         val = st.session_state[nav_key]
-        if val >= len(filtered_ids):
+        if not isinstance(val, int) or val >= len(filtered_ids):
             st.session_state[nav_key] = max(0, len(filtered_ids) - 1)
 
     current_idx = st.sidebar.selectbox(
