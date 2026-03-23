@@ -630,7 +630,7 @@ def main():
         return
 
     # ------------------------------------------------------------------
-    # Navigation — tracked by SAMPLE ID, not list index
+    # Navigation — tracked by SAMPLE ID, no selectbox (avoids state drift)
     # ------------------------------------------------------------------
     st.sidebar.markdown("## Navigation")
     filtered_id_set = set(filtered_ids)
@@ -661,38 +661,41 @@ def main():
 
     current_id = st.session_state["_current_sample_id"]
     current_idx = filtered_ids.index(current_id)
+    current_label = samples[sample_ids.index(current_id)]["label"]
 
-    # Selectbox — force it to match current_id every render
-    nav_key = "_sample_nav_selectbox"
-    st.session_state[nav_key] = current_idx
-
-    shown_idx = st.sidebar.selectbox(
-        "Sample",
-        range(len(filtered_ids)),
-        format_func=lambda i: f"Sample {filtered_ids[i]} ({samples[sample_ids.index(filtered_ids[i])]['label']})",
-        key=nav_key,
+    # Show current position
+    st.sidebar.markdown(
+        f"**Sample {current_id}** ({current_label})"
+        f"  —  {current_idx + 1} / {len(filtered_ids)}"
     )
-
-    # If user manually changed the dropdown, update current sample
-    if shown_idx != current_idx:
-        st.session_state["_current_sample_id"] = filtered_ids[shown_idx]
-        current_id = filtered_ids[shown_idx]
-        current_idx = shown_idx
-
-    sample = sample_map[current_id]
 
     # Navigation buttons
     nav_col1, nav_col2 = st.sidebar.columns(2)
     with nav_col1:
-        if current_idx > 0:
-            if st.button("Previous"):
-                st.session_state["_current_sample_id"] = filtered_ids[current_idx - 1]
-                st.rerun()
+        if st.button("← Previous", disabled=current_idx == 0):
+            st.session_state["_current_sample_id"] = filtered_ids[current_idx - 1]
+            st.rerun()
     with nav_col2:
-        if current_idx < len(filtered_ids) - 1:
-            if st.button("Next"):
-                st.session_state["_current_sample_id"] = filtered_ids[current_idx + 1]
-                st.rerun()
+        if st.button("Next →", disabled=current_idx >= len(filtered_ids) - 1):
+            st.session_state["_current_sample_id"] = filtered_ids[current_idx + 1]
+            st.rerun()
+
+    # Jump to position
+    def _on_jump():
+        pos = st.session_state.get("_jump_input", 1)
+        pos = max(1, min(pos, len(filtered_ids)))
+        st.session_state["_current_sample_id"] = filtered_ids[pos - 1]
+
+    st.sidebar.number_input(
+        "Jump to position",
+        min_value=1,
+        max_value=len(filtered_ids),
+        value=current_idx + 1,
+        key="_jump_input",
+        on_change=_on_jump,
+    )
+
+    sample = sample_map[current_id]
 
     # Show sample header
     st.markdown(f"## Sample {current_id}")
