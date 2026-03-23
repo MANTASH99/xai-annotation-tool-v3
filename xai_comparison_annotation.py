@@ -143,6 +143,7 @@ def _load_completed_from_gsheet(annotator, phase):
     """Load completed sample IDs from Google Sheets (survives app restarts)."""
     client = get_gsheet_client()
     if not client:
+        st.sidebar.caption(f"DEBUG: No gsheet client for {phase}_{annotator}")
         return set()
     try:
         sh = client.open("XAI_Comparison_Annotations")
@@ -155,8 +156,10 @@ def _load_completed_from_gsheet(annotator, phase):
                 completed.add(int(val))
             except (ValueError, TypeError):
                 pass
+        st.sidebar.caption(f"DEBUG: Loaded {len(completed)} from GSheet {phase}_{annotator}")
         return completed
-    except Exception:
+    except Exception as e:
+        st.sidebar.caption(f"DEBUG: GSheet error {phase}_{annotator}: {e}")
         return set()
 
 
