@@ -446,6 +446,9 @@ def render_phase_b(sample, annotator):
             "rank_attention": method_ranks.get("attention"),
         })
         st.session_state[f"sample_{sample_id}_phase_b_done"] = True
+        # Stay at same index: the completed sample drops from filtered list,
+        # so same index now points to the next incomplete sample
+        st.session_state["_nav_target"] = st.session_state.get("_sample_nav_selectbox", 0)
         st.success("Phase B saved! Sample complete.")
         st.rerun()
 
