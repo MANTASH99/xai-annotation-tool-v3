@@ -131,13 +131,46 @@ def save_annotation(annotator, sample_id, phase, data):
         except Exception as e:
             st.warning(f"Cloud save failed: {e}")
 
+    # Update session state cache so load_completed_samples sees this immediately
+    gsheet_key = f"_gsheet_completed_{annotator}_{phase}"
+    if gsheet_key in st.session_state:
+        st.session_state[gsheet_key].add(sample_id)
+
     return True
 
 
+def _load_completed_from_gsheet(annotator, phase):
+    """Load completed sample IDs from Google Sheets (survives app restarts)."""
+    client = get_gsheet_client()
+    if not client:
+        return set()
+    try:
+        sh = client.open("XAI_Comparison_Annotations")
+        ws = sh.worksheet(f"{phase}_{annotator}")
+        # sample_id is column 2 (annotator, sample_id, phase, timestamp, ...)
+        all_values = ws.col_values(2)
+        completed = set()
+        for val in all_values[1:]:  # skip header
+            try:
+                completed.add(int(val))
+            except (ValueError, TypeError):
+                pass
+        return completed
+    except Exception:
+        return set()
+
+
 def load_completed_samples(annotator, phase):
-    """Load set of sample IDs already annotated for this phase."""
+    """Load set of sample IDs already annotated for this phase.
+    Checks local CSV (current session) + Google Sheets (persistent across restarts)."""
+    # Google Sheets — load once per session, cached in session state
+    gsheet_key = f"_gsheet_completed_{annotator}_{phase}"
+    if gsheet_key not in st.session_state:
+        st.session_state[gsheet_key] = _load_completed_from_gsheet(annotator, phase)
+    completed = set(st.session_state[gsheet_key])
+
+    # Local CSV — has current session's annotations
     csv_path = OUTPUT_DIR / f"annotations_{annotator.lower()}_{phase}.csv"
-    completed = set()
     if csv_path.exists():
         with open(csv_path) as f:
             reader = csv.DictReader(f)
@@ -588,10 +621,26 @@ def main():
 
     # Sample navigation
     st.sidebar.markdown("## Navigation")
+
+    nav_key = "_sample_nav_selectbox"
+
+    # Apply programmatic navigation from Prev/Next buttons
+    if "_nav_target" in st.session_state:
+        target = st.session_state.pop("_nav_target")
+        target = max(0, min(target, len(filtered_ids) - 1))
+        st.session_state[nav_key] = target
+
+    # Clamp existing selectbox state to valid range (list may have shrunk after completion)
+    if nav_key in st.session_state:
+        val = st.session_state[nav_key]
+        if val >= len(filtered_ids):
+            st.session_state[nav_key] = max(0, len(filtered_ids) - 1)
+
     current_idx = st.sidebar.selectbox(
         "Sample",
         range(len(filtered_ids)),
         format_func=lambda i: f"Sample {filtered_ids[i]} ({samples[sample_ids.index(filtered_ids[i])]['label']})",
+        key=nav_key,
     )
     current_id = filtered_ids[current_idx]
     sample = sample_map[current_id]
@@ -601,12 +650,12 @@ def main():
     with nav_col1:
         if current_idx > 0:
             if st.button("Previous"):
-                st.session_state["nav_idx"] = current_idx - 1
+                st.session_state["_nav_target"] = current_idx - 1
                 st.rerun()
     with nav_col2:
         if current_idx < len(filtered_ids) - 1:
             if st.button("Next"):
-                st.session_state["nav_idx"] = current_idx + 1
+                st.session_state["_nav_target"] = current_idx + 1
                 st.rerun()
 
     # Show sample header
