@@ -510,10 +510,8 @@ def render_top5_bar_html(words, scores, label=""):
         bar_pct = abs(score) / max_abs * 100 if max_abs > 0 else 0
         if score >= 0:
             bar_color = "#e74c3c"  # red for positive
-            sign = "+"
         else:
             bar_color = "#3498db"  # blue for negative
-            sign = ""
         html.append(
             f'<div style="display:flex; align-items:center; margin:4px 0; font-size:14px;">'
             f'<span style="width:90px; text-align:right; padding-right:8px; '
@@ -522,8 +520,6 @@ def render_top5_bar_html(words, scores, label=""):
             f'<div style="width:{bar_pct:.0f}%; background:{bar_color}; height:100%; '
             f'border-radius:4px; min-width:2px;"></div>'
             f'</div>'
-            f'<span style="width:60px; text-align:right; padding-left:6px; '
-            f'font-size:12px; color:#666;">{sign}{score:.3f}</span>'
             f'</div>'
         )
 
