@@ -10,16 +10,41 @@ A Streamlit app for human evaluation of 4 XAI explanation methods (SHAP, LIME, I
 
 ## Purpose
 
-The tool collects three types of human judgment per sample:
+The tool collects two types of human judgment per sample:
 
-1. **Phase A — Word Highlighting:** Unbiased ground truth. Annotator selects the 5 words most responsible for the predicted emotion, without seeing any XAI explanations.
-2. **Phase B — Explanation Ranking:** Annotator sees 4 anonymized heatmaps and ranks them 1 (best) to 4 (worst).
-3. **Phase C — Similarity Grouping:** Annotator groups heatmaps that look similar to each other.
+1. **Phase A — Word Highlighting:** Unbiased ground truth. Annotator selects up to 5 words most responsible for the predicted emotion, without seeing any XAI explanations.
+2. **Phase B — Explanation Ranking:** Annotator sees 4 anonymized XAI explanations and ranks them 1 (best) to 4 (worst).
 
-These answer three research questions:
+These answer two research questions:
 - **RQ3a:** Which method's top features align best with human intuition? (Phase A)
 - **RQ3b:** Which method do humans prefer? (Phase B)
-- **RQ3c:** Do humans perceive the same inter-method similarity as computational metrics? (Phase C)
+
+---
+
+## Annotation Rounds
+
+The tool supports two annotation rounds with separate data and visualizations:
+
+### Round 1 (heatmaps)
+- **Data:** `data/selected_samples.json` — 200 samples, seed=42
+- **Phase B visualization:** Full-word heatmaps (all words colored by attribution score)
+- **Google Sheets worksheets:** `phase_a_{annotator}`, `phase_b_{annotator}`
+- **Status:** Benni 48, Emilia 200, Vanessa 200 (as of 2026-03-24)
+
+### Round 2 (top-5 bars)
+- **Data:** `data/selected_samples_round2.json` — 200 NEW samples, seed=99, zero overlap with Round 1
+- **Phase B visualization:** Top-5 horizontal bar charts (only the 5 most important words per method, proportional bars, no numeric scores)
+- **Google Sheets worksheets:** `r2_phase_a_{annotator}`, `r2_phase_b_{annotator}`
+- **Status:** Not started
+
+### Why Round 2 changed the visualization
+
+Raw attribution scores are **not comparable across methods**:
+- IG scores are ~8x larger than SHAP scores (different mathematical properties: IG sums to `f(x) - f(baseline)`, SHAP sums to `f(x) - E[f(x)]`)
+- LIME coefficients depend on local surrogate regularization
+- Attention weights are probabilities (sum to 1 per head)
+
+Round 1's full heatmaps also caused confusion: Attention colors almost every word (avg 16.9 visible), while SHAP highlights only 1-3 words. Round 2 shows only the top 5 words per method with proportional bars (no numbers), making methods directly comparable without magnitude bias.
 
 ---
 
@@ -27,11 +52,12 @@ These answer three research questions:
 
 ### Input
 
-| File | Description |
-|------|-------------|
-| `data/selected_samples.json` | 200 samples (20 per emotion × 10 emotions), each with all 4 methods' word-level scores |
+| File | Round | Description |
+|------|-------|-------------|
+| `data/selected_samples.json` | 1 | 200 samples (20 per emotion x 10 emotions), seed=42 |
+| `data/selected_samples_round2.json` | 2 | 200 samples (20 per emotion x 10 emotions), seed=99, no overlap with Round 1 |
 
-**Sample selection:** Random, stratified by emotion, fixed seed (42). Script: `scripts/select_annotation_samples.py`.
+**Sample selection:** Random, stratified by emotion, fixed seed. Script: `scripts/select_annotation_samples.py`.
 
 **Emotions included (10):** anger, boredom, disgust, fear, joy, pride, relief, sadness, surprise, trust. Excluded: guilt (1 sample), no-emotion (7 samples).
 
@@ -39,41 +65,76 @@ These answer three research questions:
 
 | File | Phase | Contents |
 |------|-------|----------|
-| `output/annotations_{name}_phase_a.csv` | A | Annotator name, sample ID, selected word indices and words |
-| `output/annotations_{name}_phase_b.csv` | B | Rankings per real method (rank_shap, rank_lime, rank_ig, rank_attention) |
-| `output/annotations_{name}_phase_c.csv` | C | Group assignments per real method, number of groups, optional comment |
+| `output/annotations_{name}_phase_a.csv` | A (R1) | Annotator name, sample ID, ranked word indices and words |
+| `output/annotations_{name}_phase_b.csv` | B (R1) | Rankings per real method (rank_shap, rank_lime, rank_ig, rank_attention) |
+| `output/annotations_{name}_r2_phase_a.csv` | A (R2) | Same format as R1 Phase A |
+| `output/annotations_{name}_r2_phase_b.csv` | B (R2) | Same format as R1 Phase B |
 
-All CSVs also include: sentence, predicted emotion, timestamp, and (for B/C) the shuffled method order.
+All CSVs also include: sentence, predicted emotion, timestamp, and (for B) the shuffled method order.
 
-**Persistence:** Google Sheets is the primary data store (survives Streamlit Cloud restarts). Local CSVs are also written as backup. On startup, the app loads completed sample IDs from Google Sheets (cached per session in `st.session_state`), determines each annotator's progress, and resumes at the first incomplete sample after the last completed one.
+**Persistence:** Google Sheets is the primary data store (survives Streamlit Cloud restarts). Local CSVs are also written as backup. The app also supports a local service account fallback (`annotation/gcp_service_account.json`) when `st.secrets` is unavailable.
 
 ---
 
 ## Annotation Phases
 
-### Phase A — Word Highlighting
+### Phase A — Word Highlighting (same for both rounds)
 
 - **Shown:** Sentence (large, prominent), predicted emotion
-- **NOT shown:** Confidence, correct/wrong, any XAI heatmaps
-- **Task:** Click exactly 5 words that the annotator thinks are most responsible for the emotion
+- **NOT shown:** Confidence, correct/wrong, any XAI explanations
+- **Task:** Click up to 5 words in order of importance (most important first)
 - **Design rationale:** No XAI visualizations are shown to avoid biasing annotators toward any method. This produces method-agnostic ground truth.
 - **Analysis:** Compute precision@5 and recall@5 of each method's top-5 features against the human-selected words
 
 ### Phase B — Explanation Ranking
 
-- **Shown:** Same sentence + 4 heatmaps in a 2×2 grid
+#### Round 1: Full heatmaps
+- **Shown:** Same sentence + 4 heatmaps in a 2x2 grid (all words colored)
 - **Heatmap colors:** Red = pushes toward prediction, Blue = pushes against, White = neutral
+
+#### Round 2: Top-5 bars
+- **Shown:** Same sentence + 4 top-5 bar charts in a 2x2 grid
+- **Bar display:** Each method shows its 5 highest-contributing words as horizontal bars
+- **Bar colors:** Red = pushes toward prediction, Blue = pushes against
+- **No numeric scores** — bars are proportional within each method to avoid cross-method magnitude bias
+
+#### Both rounds
 - **Labels:** "Method A", "Method B", "Method C", "Method D" (anonymized, shuffled per sample)
 - **Task:** Rank 1 (best explanation) to 4 (worst), each rank used exactly once
-- **Design rationale:** Anonymization prevents name-recognition bias (e.g., favoring SHAP because it's well-known). Shuffling per sample prevents pattern-tracking across samples.
+- **Design rationale:** Anonymization prevents name-recognition bias. Shuffling per sample prevents pattern-tracking.
 - **Analysis:** Average rank per method, Kendall's W for annotator agreement
 
-### Phase C — Similarity Grouping
+---
 
-- **Shown:** Same 4 heatmaps displayed in a row
-- **Task:** Assign each method to a group (Group 1–4). Same group = similar-looking explanations.
-- **Design rationale:** Ranking only tells us "which is best", not "which look alike." Grouping captures perceived similarity, which we compare to computational FA@5 and Spearman metrics.
-- **Analysis:** Co-occurrence matrix (how often each method pair is grouped together), compare with computational agreement metrics
+## IAA Dashboard
+
+The tool includes a built-in Inter-Annotator Agreement dashboard (accessible via sidebar toggle).
+
+### Metrics computed
+- **Per-annotator progress:** Phase A count, Phase B count, fully completed count
+- **Phase A — Word Highlighting Agreement:**
+  - Pairwise Jaccard similarity (|common words| / |all words selected by either|)
+  - Krippendorff's alpha (binary, per word position)
+- **Phase B — Ranking Agreement:**
+  - Pairwise Kendall's tau and Spearman's rho
+  - Kendall's W (overall concordance across all annotators)
+  - Same #1 pick rate
+  - Average rank per method per annotator
+
+### Round 1 IAA results (as of 2026-03-24, 3 annotators)
+
+| Metric | Value |
+|--------|-------|
+| Krippendorff's alpha (Phase A, all 3) | 0.527 |
+| Best pair Jaccard (Emilia-Vanessa) | 0.611 |
+| Kendall's W (Phase B, all 3) | 0.617 |
+| Best pair same #1 (Emilia-Vanessa) | 57.0% |
+| SHAP avg rank (overall) | 1.73 (best) |
+
+### Data source
+- Loads live from Google Sheets (cached 2 min)
+- Supports round selection (Round 1 / Round 2)
+- Refresh button to reload latest data
 
 ---
 
@@ -87,7 +148,6 @@ Methods are anonymized as "Method A/B/C/D" with the order **shuffled per sample*
 
 The annotator never sees real method names. When saving annotations, the app **maps back** to real method names automatically:
 - Phase B saves: `rank_shap=2, rank_lime=1, rank_ig=3, rank_attention=4`
-- Phase C saves: `group_shap=Group 1, group_lime=Group 1, group_ig=Group 2, group_attention=Group 2`
 
 The `method_order` column in the CSV records the shuffle for each sample, allowing full reconstruction.
 
@@ -104,24 +164,7 @@ Same 4 annotators as Paper 1:
 | Vanessa | Digital Humanities |
 | Anna | Digital Humanities |
 
-**All 4 annotators see all 200 samples** (unlike Paper 1 where samples were split). This enables inter-annotator agreement computation on the full dataset.
-
----
-
-## Method Sparsity (What Annotators Will See)
-
-Different methods produce very different heatmap patterns:
-
-| Method | Avg visible words | Pattern |
-|--------|-------------------|---------|
-| SHAP | 7.8 | Sparse — 1-3 strongly colored words, rest white |
-| LIME | 11.5 | Moderate — several colored words, some blue (negative) |
-| IG | 14.0 | Broad — many colored words, larger magnitude range |
-| Attention | 16.9 | Diffuse — many words lightly colored, never blue (always positive) |
-
-"Visible" = absolute score > 10% of the max for that method on that sample.
-
-SHAP heatmaps will often show only 1-2 strongly highlighted words. Attention heatmaps will show many words with light coloring. This is a real methodological difference, not a bug.
+**All 4 annotators see all 200 samples per round** (unlike Paper 1 where samples were split). This enables inter-annotator agreement computation on the full dataset.
 
 ---
 
@@ -137,7 +180,7 @@ streamlit run annotation/xai_comparison/xai_comparison_annotation.py
 1. Push the `annotation/xai_comparison/` directory to GitHub
    - **GitHub repo:** `MANTASH99/xai-annotation-tool-v3`
 2. Streamlit Cloud runs `streamlit_app.py` by default, which redirects to `xai_comparison_annotation.py`
-3. Configure Google Sheets secrets in Streamlit Cloud dashboard (Settings → Secrets):
+3. Configure Google Sheets secrets in Streamlit Cloud dashboard (Settings > Secrets):
    ```toml
    [gcp_service_account]
    type = "service_account"
@@ -146,7 +189,7 @@ streamlit run annotation/xai_comparison/xai_comparison_annotation.py
    client_email = "..."
    ...
    ```
-4. The app saves to Google Sheet **`XAI_Comparison_Annotations`** and creates worksheets automatically: `phase_a_{annotator}`, `phase_b_{annotator}`, `phase_c_{annotator}`
+4. The app saves to Google Sheet **`XAI_Comparison_Annotations`** and creates worksheets automatically per round and phase
 
 ---
 
@@ -154,14 +197,16 @@ streamlit run annotation/xai_comparison/xai_comparison_annotation.py
 
 ```
 annotation/xai_comparison/
-├── xai_comparison_annotation.py    # Main Streamlit app (all logic lives here)
-├── streamlit_app.py                # Entry point redirect (imports main() from above)
-├── requirements.txt                # Dependencies (streamlit, gspread, google-auth)
+├── xai_comparison_annotation.py    # Main Streamlit app (all logic)
+├── streamlit_app.py                # Entry point redirect
+├── requirements.txt                # Dependencies (streamlit, gspread, google-auth, scipy, numpy, pandas)
 ├── ANNOTATION_TOOL.md              # This file
+├── ANNOTATION_GUIDELINES.md        # Annotator instructions
 ├── .streamlit/
 │   └── config.toml                 # Theme configuration
 ├── data/
-│   └── selected_samples.json       # 200 samples with all 4 methods' scores
+│   ├── selected_samples.json       # Round 1: 200 samples (seed=42)
+│   └── selected_samples_round2.json # Round 2: 200 samples (seed=99)
 └── output/
     └── annotations_*.csv           # Local CSV backup (created at runtime)
 ```
@@ -175,12 +220,12 @@ annotation/xai_comparison/
 - On startup, the app loads completed samples from Google Sheets, finds the **last completed sample** for the annotator, and resumes at the next incomplete one
 - Word buttons use `on_click` callbacks (not `st.rerun()`) to avoid double-reruns that corrupt widget state
 - Previous/Next buttons update `_current_sample_id` directly
-- Switching annotators resets navigation to the correct resume point for the new annotator
+- Switching annotators or rounds resets navigation to the correct resume point
 
 ### Design decisions (2026-03-23)
-- **No `st.selectbox` for navigation.** Streamlit ignores `st.session_state[key]` overrides after a widget's first render. This caused the selectbox to drift to a different sample on any button click.
-- **No `number_input` with `on_change` for jumping.** When annotator switches change `max_value`, Streamlit silently clamps the stored value and fires `on_change`, overriding `_current_sample_id`.
-- **`streamlit_app.py` is a redirect only.** Streamlit Cloud defaults to `streamlit_app.py` as the entry point. All logic is in `xai_comparison_annotation.py` to keep a single source of truth.
+- **No `st.selectbox` for navigation.** Streamlit ignores `st.session_state[key]` overrides after a widget's first render.
+- **No `number_input` with `on_change` for jumping.** When annotator switches change `max_value`, Streamlit silently clamps the stored value.
+- **`streamlit_app.py` is a redirect only.** Streamlit Cloud defaults to `streamlit_app.py` as the entry point.
 
 ---
 
@@ -190,20 +235,26 @@ annotation/xai_comparison/
 |--------|---------|---------------------|
 | Purpose | Judge SHAP explanations (correct/wrong reason) | Compare 4 XAI methods |
 | Methods shown | Normal SHAP + Relational SHAP | SHAP, LIME, IG, Attention (anonymized) |
-| Annotation type | Per-feature correct/wrong + overall judgment | Word selection + ranking + grouping |
-| Samples | 2,861 (split across annotators) | 200 (all annotators see all) |
-| XAI bias | Annotators see SHAP visualizations | Phase A has no visualizations; Phases B/C are anonymized |
-| Visualization | Plotly bar charts | Inline HTML word heatmaps |
+| Annotation type | Per-feature correct/wrong + overall judgment | Word selection + ranking |
+| Samples | 2,861 (split across annotators) | 200 per round (all annotators see all) |
+| XAI bias | Annotators see SHAP visualizations | Phase A has no visualizations; Phase B is anonymized |
+| Visualization | Plotly bar charts | R1: heatmaps, R2: top-5 bars (no scores) |
 
 ---
 
-## Annotation Progress (as of 2026-03-23)
+## Annotation Progress (as of 2026-03-24)
 
-| Annotator | Phase A | Phase B | Fully Done | Resume At |
-|-----------|---------|---------|------------|-----------|
-| Benni     | 25      | 24      | 24         | 540       |
-| Emilia    | 51      | 51      | 51         | 782       |
-| Vanessa   | 51      | 51      | 51         | 782       |
-| Anna      | 0       | 0       | 0          | 20        |
+### Round 1
 
-*Created: 2026-03-17, Updated: 2026-03-23*
+| Annotator | Phase A | Phase B | Fully Done |
+|-----------|---------|---------|------------|
+| Benni     | 48      | 47      | 47         |
+| Emilia    | 196     | 200     | 196        |
+| Vanessa   | 200     | 200     | 200        |
+| Anna      | 0       | 0       | 0          |
+
+### Round 2
+
+Not started.
+
+*Created: 2026-03-17, Updated: 2026-03-24*
