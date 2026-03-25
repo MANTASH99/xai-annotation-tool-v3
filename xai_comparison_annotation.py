@@ -37,7 +37,12 @@ METHOD_DISPLAY = {"shap": "SHAP", "lime": "LIME", "ig": "Integrated Gradients", 
 MAX_HIGHLIGHT = 5
 TOP_K = 5  # Number of top features shown in Round 2 Phase B
 
-ANNOTATOR_NAMES = ["Benni", "Emilia", "Vanessa", "Anna"]
+ANNOTATOR_NAMES = ["Benni", "Emilia", "Vanessa", "Anna", "Roman"]
+
+# Roman gets a fixed subset of 20 samples (2 per emotion, seed=2026) for review only.
+# His annotations are saved locally only (no Google Sheets).
+ROMAN_SAMPLE_IDS_R1 = {25, 192, 598, 615, 666, 731, 1208, 1188, 1377, 1447, 1731, 1708, 1931, 1892, 2100, 1948, 2555, 2319, 2590, 2675}
+ROMAN_SAMPLE_IDS_R2 = {144, 237, 604, 629, 680, 695, 1161, 1110, 1409, 1467, 1735, 1704, 1910, 1871, 2070, 1969, 2556, 2367, 2653, 2705}
 
 try:
     import gspread
@@ -142,19 +147,20 @@ def save_annotation(annotator, sample_id, phase, data, round_num=1):
             writer.writeheader()
         writer.writerow(row)
 
-    # Google Sheets (optional)
-    client = get_gsheet_client()
-    if client:
-        try:
-            ws = get_or_create_worksheet(
-                client,
-                "XAI_Comparison_Annotations",
-                f"{phase_key}_{annotator}",
-                list(row.keys()),
-            )
-            ws.append_row(list(row.values()))
-        except Exception as e:
-            st.warning(f"Cloud save failed: {e}")
+    # Google Sheets (optional, skip for Roman — review-only annotator)
+    if annotator != "Roman":
+        client = get_gsheet_client()
+        if client:
+            try:
+                ws = get_or_create_worksheet(
+                    client,
+                    "XAI_Comparison_Annotations",
+                    f"{phase_key}_{annotator}",
+                    list(row.keys()),
+                )
+                ws.append_row(list(row.values()))
+            except Exception as e:
+                st.warning(f"Cloud save failed: {e}")
 
     # Update session state cache so load_completed_samples sees this immediately
     gsheet_key = f"_gsheet_completed_{annotator}_{phase_key}"
@@ -166,6 +172,8 @@ def save_annotation(annotator, sample_id, phase, data, round_num=1):
 
 def _load_completed_from_gsheet(annotator, phase_key):
     """Load completed sample IDs from Google Sheets (survives app restarts)."""
+    if annotator == "Roman":
+        return set()
     client = get_gsheet_client()
     if not client:
         st.sidebar.caption(f"DEBUG: No gsheet client for {phase_key}_{annotator}")
@@ -1193,12 +1201,18 @@ def main():
 
     # Load data for selected round
     samples = load_samples(round_num)
-    sample_map = {s["id"]: s for s in samples}
-    sample_ids = [s["id"] for s in samples]
 
     # Sidebar: annotator selection
     st.sidebar.markdown("## Settings")
     annotator = st.sidebar.selectbox("Annotator", ANNOTATOR_NAMES)
+
+    # Roman sees only 20 review samples
+    if annotator == "Roman":
+        roman_ids = ROMAN_SAMPLE_IDS_R1 if round_num == 1 else ROMAN_SAMPLE_IDS_R2
+        samples = [s for s in samples if s["id"] in roman_ids]
+
+    sample_map = {s["id"]: s for s in samples}
+    sample_ids = [s["id"] for s in samples]
 
     # Progress tracking
     completed_a = load_completed_samples(annotator, "phase_a", round_num)
